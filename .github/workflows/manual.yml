@@ -2,13 +2,16 @@ name: Build
 on:
   workflow_dispatch:
 
+env:
+  Branch: 4.1.x
+
 jobs:      
   what-to-make:
     runs-on: ubuntu-22.04
     outputs:
       make-core: true
-      #make-android: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.android-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
-      #make-cli: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.cli-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
+      #make-android: true
+      #make-cli: true
       make-daemon: true
       #make-dist: true
       #make-docs: true
@@ -16,34 +19,36 @@ jobs:
       #make-mac: true
       #make-qt: true
       make-source-tarball: true
-      #make-tests: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.tests-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
-      #make-utils: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.utils-changed == '1' || steps.check-diffs.outputs.tests-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
+      #make-tests: true
+      #make-utils: true
       make-web: true
-      #test-style: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.our-code-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
+      #test-style: true
+      make-debian: true
+      #make-windows: true
     steps:
       - name: Get Source
         id: get-source
         uses: actions/checkout@v4
         with:
-          repository: transmission/transmission  # Specify the repo you want to check out
-          ref: 4.1.x  # Specify the branch you want to check out
+          repository: transmission/transmission
+          ref: $Branch
           fetch-depth: 0
           path: src
           submodules: recursive
 
   windows:
     needs: [ what-to-make ]
-    if: ${{ needs.what-to-make.outputs.make-cli == 'true' || needs.what-to-make.outputs.make-daemon == 'true' || needs.what-to-make.outputs.make-dist == 'true' || needs.what-to-make.outputs.make-qt == 'true' || needs.what-to-make.outputs.make-tests == 'true' || needs.what-to-make.outputs.make-utils == 'true' }}
+    if: ${{ needs.what-to-make.outputs.make-windows == 'true' && (needs.what-to-make.outputs.make-cli == 'true' || needs.what-to-make.outputs.make-daemon == 'true' || needs.what-to-make.outputs.make-dist == 'true' || needs.what-to-make.outputs.make-qt == 'true' || needs.what-to-make.outputs.make-tests == 'true' || needs.what-to-make.outputs.make-utils == 'true') }}
     strategy:
       fail-fast: false
       matrix:
         include:
-          - arch: x86
-            runner: windows-2022
+          # - arch: x86
+            # runner: windows-2022
           - arch: x64
             runner: windows-2022
-          - arch: arm64
-            runner: windows-11-arm
+          # - arch: arm64
+            # runner: windows-11-arm
     runs-on: ${{ matrix.runner }}
     steps:
       - name: Show Configuration
@@ -53,8 +58,8 @@ jobs:
       - name: Get Source
         uses: actions/checkout@v4
         with:
-          repository: transmission/transmission  # Specify the repo you want to check out
-          ref: 4.1.x  # Specify the branch you want to check out
+          repository: transmission/transmission
+          ref: $env:Branch
           path: src
           submodules: recursive
       - name: Prepare Build Deps
@@ -98,11 +103,11 @@ jobs:
           cmake --build obj --config RelWithDebInfo --target pack-msi
       - uses: actions/upload-artifact@v4
         with:
-          name: binaries-${{ github.job }}-${{ matrix.arch }}
+          name: transmission-${{ github.job }}-${{ matrix.arch }}-${{ env.Branch }}
           path: pfx/**/*
       - uses: actions/upload-artifact@v4
         with:
-          name: binaries-${{ github.job }}-${{ matrix.arch }}-msi
+          name: transmission-${{ github.job }}-${{ matrix.arch }}-${{ env.Branch }}-msi
           path: obj/dist/msi/*.msi
 
   make-source-tarball:
@@ -128,8 +133,8 @@ jobs:
       - name: Get Source
         uses: actions/checkout@v4
         with:
-          repository: transmission/transmission  # Specify the repo you want to check out
-          ref: 4.1.x  # Specify the branch you want to check out
+          repository: transmission/transmission
+          ref: $Branch
           path: src
           submodules: recursive
       - name: Configure
@@ -147,7 +152,7 @@ jobs:
 
   debian-12-from-tarball:
     needs: [ make-source-tarball, what-to-make ]
-    if: ${{ needs.what-to-make.outputs.make-cli == 'true' || needs.what-to-make.outputs.make-daemon == 'true' || needs.what-to-make.outputs.make-gtk == 'true' || needs.what-to-make.outputs.make-qt == 'true' || needs.what-to-make.outputs.make-tests == 'true' || needs.what-to-make.outputs.make-utils == 'true' }}
+    if: ${{ needs.what-to-make.outputs.make-debian == 'true' && (needs.what-to-make.outputs.make-cli == 'true' || needs.what-to-make.outputs.make-daemon == 'true' || needs.what-to-make.outputs.make-gtk == 'true' || needs.what-to-make.outputs.make-qt == 'true' || needs.what-to-make.outputs.make-tests == 'true' || needs.what-to-make.outputs.make-utils == 'true') }}
     runs-on: ubuntu-latest
     container:
       image: debian:12
@@ -220,7 +225,7 @@ jobs:
         run: cmake --build obj --config RelWithDebInfo --target install/strip
       - uses: actions/upload-artifact@v4
         with:
-          name: binaries-${{ github.job }}
+          name: transmission_debian12-${{ env.Branch }}
           path: pfx/**/*
 
   android:
@@ -241,7 +246,7 @@ jobs:
       uses: actions/checkout@v4
       with:
         repository: transmission/transmission  # Specify the repo you want to check out
-        ref: 4.1.x  # Specify the branch you want to check out
+        ref: $Branch  # Specify the branch you want to check out
         submodules: recursive
 
     - name: Set up JDK 17
