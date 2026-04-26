@@ -25,6 +25,9 @@ jobs:
       #test-style: true
       make-debian: true
       #make-windows: true
+    steps:
+      - id: output
+        run: echo "Done"
 
   windows:
     needs: [ what-to-make ]
