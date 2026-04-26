@@ -25,16 +25,6 @@ jobs:
       #test-style: true
       make-debian: true
       #make-windows: true
-    steps:
-      - name: Get Source
-        id: get-source
-        uses: actions/checkout@v4
-        with:
-          repository: transmission/transmission
-          ref: $Branch
-          fetch-depth: 0
-          path: src
-          submodules: recursive
 
   windows:
     needs: [ what-to-make ]
@@ -59,7 +49,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: transmission/transmission
-          ref: $env:Branch
+          ref: ${{ env.Branch }}
           path: src
           submodules: recursive
       - name: Prepare Build Deps
@@ -134,7 +124,7 @@ jobs:
         uses: actions/checkout@v4
         with:
           repository: transmission/transmission
-          ref: $Branch
+          ref: ${{ env.Branch }}
           path: src
           submodules: recursive
       - name: Configure
