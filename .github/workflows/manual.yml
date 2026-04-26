@@ -1,0 +1,276 @@
+name: Build
+on:
+  workflow_dispatch:
+
+jobs:
+  what-to-make:
+    runs-on: ubuntu-22.04
+    outputs:
+      make-core: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.core-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
+      #make-android: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.android-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
+      #make-cli: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.cli-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
+      make-daemon: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.daemon-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
+      #make-dist: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.dist-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
+      #make-docs: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.docs-changed == '1' }}
+      #make-gtk: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.gtk-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
+      #make-mac: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.mac-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
+      #make-qt: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.qt-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
+      #make-source-tarball: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.any-code-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
+      #make-tests: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.tests-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
+      #make-utils: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.utils-changed == '1' || steps.check-diffs.outputs.tests-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
+      make-web: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.web-changed == '1' }}
+      #test-style: ${{ steps.check-main-push.outputs.is-main-push == '1' || steps.check-diffs.outputs.our-code-changed == '1' || steps.check-diffs.outputs.ci-actions-changed == '1' }}
+    steps:
+      - name: Get Source
+        id: get-source
+        uses: actions/checkout@v4
+        with:
+          repository: transmission/transmission  # Specify the repo you want to check out
+          ref: 4.1.x  # Specify the branch you want to check out
+          fetch-depth: 0
+          path: src
+          submodules: recursive
+
+  windows:
+    needs: [ what-to-make ]
+    if: ${{ needs.what-to-make.outputs.make-cli == 'true' || needs.what-to-make.outputs.make-daemon == 'true' || needs.what-to-make.outputs.make-dist == 'true' || needs.what-to-make.outputs.make-qt == 'true' || needs.what-to-make.outputs.make-tests == 'true' || needs.what-to-make.outputs.make-utils == 'true' }}
+    strategy:
+      fail-fast: false
+      matrix:
+        include:
+          - arch: x86
+            runner: windows-2022
+          - arch: x64
+            runner: windows-2022
+          - arch: arm64
+            runner: windows-11-arm
+    runs-on: ${{ matrix.runner }}
+    steps:
+      - name: Show Configuration
+        run: |
+          echo '${{ toJSON(needs) }}'
+          echo '${{ toJSON(runner) }}'
+      - name: Get Source
+        uses: actions/checkout@v4
+        with:
+          repository: transmission/transmission  # Specify the repo you want to check out
+          ref: 4.1.x  # Specify the branch you want to check out
+          path: src
+          submodules: recursive
+      - name: Prepare Build Deps
+        uses: ./src/.github/actions/prepare-deps-win32
+        with:
+          arch: ${{ matrix.arch }}
+          type: Deps
+      - name: Configure
+        run: |
+          Import-VisualStudioVars -VisualStudioVersion 2022 -Architecture ${{ matrix.arch }}
+          cmake `
+            -S src `
+            -B obj `
+            -G Ninja `
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo `
+            -DCMAKE_INSTALL_PREFIX=pfx `
+            -DCMAKE_PREFIX_PATH="${Env:DEPS_PREFIX}" `
+            -DENABLE_CLI=${{ (needs.what-to-make.outputs.make-cli == 'true') && 'ON' || 'OFF' }} `
+            -DENABLE_DAEMON=${{ (needs.what-to-make.outputs.make-daemon == 'true' || needs.what-to-make.outputs.make-dist == 'true') && 'ON' || 'OFF' }} `
+            -DENABLE_GTK=OFF `
+            -DENABLE_MAC=OFF `
+            -DENABLE_QT=${{ (needs.what-to-make.outputs.make-dist == 'true' || needs.what-to-make.outputs.make-qt == 'true') && 'ON' || 'OFF' }} `
+            -DENABLE_TESTS=${{ (needs.what-to-make.outputs.make-tests == 'true') && 'ON' || 'OFF' }} `
+            -DENABLE_UTILS=ON `
+            -DREBUILD_WEB=${{ (needs.what-to-make.outputs.make-web == 'true') && 'ON' || 'OFF' }} `
+            -DENABLE_WERROR=ON `
+            -DRUN_CLANG_TIDY=OFF
+      - name: Make
+        run: |
+          Import-VisualStudioVars -VisualStudioVersion 2022 -Architecture ${{ matrix.arch }}
+          cmake --build obj --config RelWithDebInfo
+      - name: Test
+        if: ${{ needs.what-to-make.outputs.make-tests == 'true' }}
+        run: cmake -E chdir obj ctest -j $(nproc) --build-config RelWithDebInfo --output-on-failure --timeout 600
+      - name: Install
+        run: cmake --build obj --config RelWithDebInfo --target install
+      - name: Package
+        if: ${{ needs.what-to-make.outputs.make-dist == 'true' || (needs.what-to-make.outputs.make-daemon == 'true' && needs.what-to-make.outputs.make-qt == 'true') }}
+        run: |
+          Import-VisualStudioVars -VisualStudioVersion 2022 -Architecture ${{ matrix.arch }}
+          cmake --build obj --config RelWithDebInfo --target pack-msi
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ github.job }}-${{ matrix.arch }}
+          path: pfx/**/*
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ github.job }}-${{ matrix.arch }}-msi
+          path: obj/dist/msi/*.msi
+
+  make-source-tarball:
+    runs-on: ubuntu-22.04
+    needs: [ what-to-make ]
+    if: ${{ needs.what-to-make.outputs.make-source-tarball == 'true' }}
+    steps:
+      - name: Show Configuration
+        run: |
+          echo '${{ toJSON(needs) }}'
+          echo '${{ toJSON(runner) }}'
+          cat /etc/os-release
+      - name: Get Dependencies
+        run: |
+          set -ex
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            ca-certificates \
+            cmake \
+            libcurl4-openssl-dev \
+            libssl-dev \
+            ninja-build
+      - name: Get Source
+        uses: actions/checkout@v4
+        with:
+          repository: transmission/transmission  # Specify the repo you want to check out
+          ref: 4.1.x  # Specify the branch you want to check out
+          path: src
+          submodules: recursive
+      - name: Configure
+        run: |
+          cmake \
+            -S src \
+            -B obj \
+            -G Ninja
+      - name: Create source tarball
+        run: cmake --build obj --target package_source
+      - uses: actions/upload-artifact@v4
+        with:
+          name: source-tarball
+          path: obj/transmission*.tar.*
+
+  debian-12-from-tarball:
+    needs: [ make-source-tarball, what-to-make ]
+    if: ${{ needs.what-to-make.outputs.make-cli == 'true' || needs.what-to-make.outputs.make-daemon == 'true' || needs.what-to-make.outputs.make-gtk == 'true' || needs.what-to-make.outputs.make-qt == 'true' || needs.what-to-make.outputs.make-tests == 'true' || needs.what-to-make.outputs.make-utils == 'true' }}
+    runs-on: ubuntu-latest
+    container:
+      image: debian:12
+    steps:
+      - name: Show Configuration
+        run: |
+          echo '${{ toJSON(needs) }}'
+          echo '${{ toJSON(runner) }}'
+          cat /etc/os-release
+      - name: Get Dependencies
+        run: |
+          set -ex
+          apt-get update
+          apt-get install -y --no-install-recommends \
+            ca-certificates \
+            cmake \
+            g++ \
+            gettext \
+            libcurl4-openssl-dev \
+            libdeflate-dev \
+            libevent-dev \
+            libfmt-dev \
+            libminiupnpc-dev \
+            libnatpmp-dev \
+            libpsl-dev \
+            libssl-dev \
+            ninja-build \
+            pkg-config \
+            xz-utils
+      - name: Get NPM
+        uses: actions/setup-node@v4
+        with:
+          node-version: lts/*
+      - name: Get Dependencies (GTK)
+        if: ${{ needs.what-to-make.outputs.make-gtk == 'true' }}
+        run: apt-get install -y --no-install-recommends libglibmm-2.4-dev libgtkmm-3.0-dev
+      - name: Get Dependencies (Qt5)
+        if: ${{ needs.what-to-make.outputs.make-qt == 'true' }}
+        run: apt-get install -y --no-install-recommends qtbase5-dev libqt5svg5-dev qttools5-dev
+      - name: Get Source
+        uses: actions/download-artifact@v4
+        with:
+          name: source-tarball
+      - name: Extract Source
+        run: mkdir src && tar xf transmission*.tar.* -C src --strip-components 1
+      - name: Configure
+        run: |
+          cmake \
+            -S src \
+            -B obj \
+            -G Ninja \
+            -DCMAKE_BUILD_TYPE=RelWithDebInfo \
+            -DCMAKE_INSTALL_PREFIX=pfx \
+            -DENABLE_CLI=${{ (needs.what-to-make.outputs.make-cli == 'true') && 'ON' || 'OFF' }} \
+            -DENABLE_DAEMON=${{ (needs.what-to-make.outputs.make-daemon == 'true') && 'ON' || 'OFF' }} \
+            -DENABLE_GTK=${{ (needs.what-to-make.outputs.make-gtk == 'true') && 'ON' || 'OFF' }} \
+            -DENABLE_MAC=OFF \
+            -DENABLE_QT=${{ (needs.what-to-make.outputs.make-qt == 'true') && 'ON' || 'OFF' }} \
+            -DENABLE_TESTS=${{ (needs.what-to-make.outputs.make-tests == 'true') && 'ON' || 'OFF' }} \
+            -DENABLE_UTILS=${{ (needs.what-to-make.outputs.make-utils == 'true') && 'ON' || 'OFF' }} \
+            -DREBUILD_WEB=${{ (needs.what-to-make.outputs.make-web == 'true') && 'ON' || 'OFF' }} \
+            -DENABLE_WERROR=ON \
+            -DRUN_CLANG_TIDY=OFF
+      - name: Build
+        run: cmake --build obj --config RelWithDebInfo
+      - name: Test
+        if: ${{ needs.what-to-make.outputs.make-tests == 'true' }}
+        run: cmake -E chdir obj ctest -j $(nproc) --build-config RelWithDebInfo --output-on-failure
+      - name: Install
+        run: cmake --build obj --config RelWithDebInfo --target install/strip
+      - uses: actions/upload-artifact@v4
+        with:
+          name: binaries-${{ github.job }}
+          path: pfx/**/*
+
+  android:
+    needs: [ what-to-make ]
+    if: ${{ needs.what-to-make.outputs.make-android == 'true' }}
+    runs-on: ubuntu-22.04
+    env:
+      VCPKG_DEFAULT_TRIPLET: arm64-android
+    steps:
+    - name: Get Dependencies
+      run: |
+        set -ex
+        sudo apt-get update
+        sudo apt-get install -y --no-install-recommends \
+          ninja-build
+
+    - name: Get Source
+      uses: actions/checkout@v4
+      with:
+        repository: transmission/transmission  # Specify the repo you want to check out
+        ref: 4.1.x  # Specify the branch you want to check out
+        submodules: recursive
+
+    - name: Set up JDK 17
+      uses: actions/setup-java@v4
+      with:
+        java-version: '17'
+        distribution: 'temurin'
+
+    - name: Setup Gradle
+      uses: gradle/gradle-build-action@v3
+      with:
+        gradle-version: 7.6
+
+    - name: Setup Android SDK
+      uses: android-actions/setup-android@v3
+
+    - name: Install NDK
+      run: sdkmanager "ndk;26.1.10909125"
+
+    - name: Setup vcpkg
+      uses: lukka/run-vcpkg@v11
+      with:
+        vcpkgGitCommitId: 53bef8994c541b6561884a8395ea35715ece75db # 2024.01.12
+
+    - name: Install vcpkg packages
+      run: |
+        vcpkg install openssl curl
+
+    - name: Build Transmission
+      working-directory: ./android
+      run: |
+        gradle build
